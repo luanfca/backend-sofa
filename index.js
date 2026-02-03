@@ -1,12 +1,63 @@
 import express from "express";
 import cors from "cors";
+import webpush from "web-push";
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+
 const SOFA_BASE = "https://api.sofascore.com/api/v1";
 const SOFA_IMG = "https://api.sofascore.app/api/v1";
+
+/* ======================================================
+   🔔 PUSH CONFIG (VAPID)
+====================================================== */
+webpush.setVapidDetails(
+  "mailto:admin@livematch.app",
+  process.env.VAPID_PUBLIC,
+  process.env.VAPID_PRIVATE
+);
+
+const subscriptions = [];
+
+/* ======================================================
+   🔔 REGISTRAR PUSH (FRONT → BACKEND)
+   POST /push/subscribe
+====================================================== */
+app.post("/push/subscribe", (req, res) => {
+  const sub = req.body;
+  if (!sub || !sub.endpoint) {
+    return res.status(400).json({ error: "Invalid subscription" });
+  }
+
+  subscriptions.push(sub);
+  res.status(201).json({ success: true });
+});
+
+/* ======================================================
+   🔔 ENVIAR PUSH REAL
+   POST /push/send
+====================================================== */
+app.post("/push/send", async (req, res) => {
+  const { title, body } = req.body;
+
+  const payload = JSON.stringify({
+    title: title || "LiveMatch ⚽",
+    body: body || "Evento detectado",
+  });
+
+  for (const sub of subscriptions) {
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (err) {
+      console.error("Push error:", err);
+    }
+  }
+
+  res.sendStatus(200);
+});
 
 /* ======================================================
    🔴 Jogos ao vivo
@@ -16,8 +67,7 @@ app.get("/live", async (_req, res) => {
   try {
     const r = await fetch(`${SOFA_BASE}/sport/football/events/live`, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0",
         Accept: "application/json",
         Referer: "https://www.sofascore.com/",
       },
@@ -44,8 +94,7 @@ app.get("/lineups/:eventId", async (req, res) => {
 
     const r = await fetch(`${SOFA_BASE}/event/${eventId}/lineups`, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0",
         Accept: "application/json",
         Referer: "https://www.sofascore.com/",
       },
@@ -63,7 +112,7 @@ app.get("/lineups/:eventId", async (req, res) => {
 });
 
 /* ======================================================
-   📊 Estatísticas de jogador
+   📊 Estatísticas do jogador
    GET /player/:eventId/:playerName
 ====================================================== */
 app.get("/player/:eventId/:playerName", async (req, res) => {
@@ -72,8 +121,7 @@ app.get("/player/:eventId/:playerName", async (req, res) => {
 
     const r = await fetch(`${SOFA_BASE}/event/${eventId}/lineups`, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0",
         Accept: "application/json",
         Referer: "https://www.sofascore.com/",
       },
@@ -86,62 +134,31 @@ app.get("/player/:eventId/:playerName", async (req, res) => {
     const data = await r.json();
 
     const normalize = (str = "") =>
-      str
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .trim();
+      str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
     const findPlayer = (team) => {
       for (const row of team?.players || []) {
-        const player = row.player || {};
-        const stats = row.statistics || {};
-        const name = player.name || player.shortName || "";
+        const p = row.player || {};
+        const s = row.statistics || {};
 
-        if (
-          normalize(name).includes(normalize(playerName)) ||
-          normalize(playerName).includes(normalize(name))
-        ) {
+        const name = p.name || p.shortName || "";
+        if (normalize(name).includes(normalize(playerName))) {
           return {
-            displayName: player.name || playerName,
-            playerId: player.id,
-            minutes: stats.minutesPlayed || 0,
-            tackles: stats.totalTackle || stats.tackles || 0,
-            fouls:
-              stats.fouls ||
-              stats.foulCommitted ||
-              stats.totalFoul ||
-              0,
-            foulsDrawn:
-              stats.wasFouled ||
-              stats.foulDrawn ||
-              stats.foulsWon ||
-              0,
-            shotsTotal:
-              stats.totalShots ||
-              stats.shotsTotal ||
-              0,
-            shotsOnTarget:
-              stats.onTargetScoringAttempt ||
-              stats.shotsOnTarget ||
-              0,
-            yellowCards:
-              stats.yellowCards || stats.yellowCard || 0,
-            redCards:
-              stats.redCards || stats.redCard || 0,
-            rating: stats.rating || 0,
+            displayName: name,
+            playerId: p.id,
+            tackles: s.totalTackle || 0,
+            fouls: s.foulCommitted || 0,
+            shotsOnTarget: s.onTargetScoringAttempt || 0,
+            yellowCards: s.yellowCards || 0,
+            rating: s.rating || 0,
           };
         }
       }
       return null;
     };
 
-    const result =
-      findPlayer(data.home) || findPlayer(data.away);
-
-    if (!result) {
-      return res.status(404).json({ error: "Player not found" });
-    }
+    const result = findPlayer(data.home) || findPlayer(data.away);
+    if (!result) return res.status(404).json({ error: "Player not found" });
 
     res.json(result);
   } catch (err) {
@@ -151,28 +168,17 @@ app.get("/player/:eventId/:playerName", async (req, res) => {
 });
 
 /* ======================================================
-   🖼️ IMAGEM DO JOGADOR (PROXY – ESSENCIAL)
+   🖼️ Imagem do jogador (proxy)
    GET /player-image/:playerId
 ====================================================== */
 app.get("/player-image/:playerId", async (req, res) => {
-  const { playerId } = req.params;
-
   try {
     const r = await fetch(
-      `${SOFA_IMG}/player/${playerId}/image`,
-      {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-          Referer: "https://www.sofascore.com/",
-          Accept: "image/*",
-        },
-      }
+      `${SOFA_IMG}/player/${req.params.playerId}/image`,
+      { headers: { "User-Agent": "Mozilla/5.0" } }
     );
 
-    if (!r.ok) {
-      return res.status(404).end();
-    }
+    if (!r.ok) return res.status(404).end();
 
     const buffer = Buffer.from(await r.arrayBuffer());
     res.setHeader("Content-Type", "image/jpeg");
@@ -185,10 +191,10 @@ app.get("/player-image/:playerId", async (req, res) => {
 });
 
 /* ======================================================
-   ❤️ Health check
+   ❤️ Health
 ====================================================== */
 app.get("/", (_req, res) => {
-  res.send("Backend SofaScore OK");
+  res.send("LiveMatch Backend OK");
 });
 
 /* ======================================================
