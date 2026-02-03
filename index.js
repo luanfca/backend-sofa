@@ -6,19 +6,20 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 const SOFA_BASE = "https://api.sofascore.com/api/v1";
+const SOFA_IMG = "https://api.sofascore.app/api/v1";
 
-/**
- * 🔴 Jogos ao vivo
- * GET /live
- */
+/* ======================================================
+   🔴 Jogos ao vivo
+   GET /live
+====================================================== */
 app.get("/live", async (_req, res) => {
   try {
     const r = await fetch(`${SOFA_BASE}/sport/football/events/live`, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.sofascore.com/",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        Accept: "application/json",
+        Referer: "https://www.sofascore.com/",
       },
     });
 
@@ -28,14 +29,15 @@ app.get("/live", async (_req, res) => {
 
     res.json(await r.json());
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "internal error" });
   }
 });
 
-/**
- * 👥 Escalações
- * GET /lineups/:eventId
- */
+/* ======================================================
+   👥 Escalações
+   GET /lineups/:eventId
+====================================================== */
 app.get("/lineups/:eventId", async (req, res) => {
   try {
     const { eventId } = req.params;
@@ -43,9 +45,9 @@ app.get("/lineups/:eventId", async (req, res) => {
     const r = await fetch(`${SOFA_BASE}/event/${eventId}/lineups`, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.sofascore.com/",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        Accept: "application/json",
+        Referer: "https://www.sofascore.com/",
       },
     });
 
@@ -55,14 +57,15 @@ app.get("/lineups/:eventId", async (req, res) => {
 
     res.json(await r.json());
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "internal error" });
   }
 });
 
-/**
- * 📊 Estatísticas de um jogador
- * GET /player/:eventId/:playerName
- */
+/* ======================================================
+   📊 Estatísticas de jogador
+   GET /player/:eventId/:playerName
+====================================================== */
 app.get("/player/:eventId/:playerName", async (req, res) => {
   try {
     const { eventId, playerName } = req.params;
@@ -70,9 +73,9 @@ app.get("/player/:eventId/:playerName", async (req, res) => {
     const r = await fetch(`${SOFA_BASE}/event/${eventId}/lineups`, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.sofascore.com/",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        Accept: "application/json",
+        Referer: "https://www.sofascore.com/",
       },
     });
 
@@ -82,7 +85,6 @@ app.get("/player/:eventId/:playerName", async (req, res) => {
 
     const data = await r.json();
 
-    // Procura jogador pelo nome
     const normalize = (str = "") =>
       str
         .normalize("NFD")
@@ -125,7 +127,8 @@ app.get("/player/:eventId/:playerName", async (req, res) => {
               0,
             yellowCards:
               stats.yellowCards || stats.yellowCard || 0,
-            redCards: stats.redCards || stats.redCard || 0,
+            redCards:
+              stats.redCards || stats.redCard || 0,
             rating: stats.rating || 0,
           };
         }
@@ -142,17 +145,55 @@ app.get("/player/:eventId/:playerName", async (req, res) => {
 
     res.json(result);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "internal error" });
   }
 });
 
-/**
- * Health check
- */
+/* ======================================================
+   🖼️ IMAGEM DO JOGADOR (PROXY – ESSENCIAL)
+   GET /player-image/:playerId
+====================================================== */
+app.get("/player-image/:playerId", async (req, res) => {
+  const { playerId } = req.params;
+
+  try {
+    const r = await fetch(
+      `${SOFA_IMG}/player/${playerId}/image`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+          Referer: "https://www.sofascore.com/",
+          Accept: "image/*",
+        },
+      }
+    );
+
+    if (!r.ok) {
+      return res.status(404).end();
+    }
+
+    const buffer = Buffer.from(await r.arrayBuffer());
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).end();
+  }
+});
+
+/* ======================================================
+   ❤️ Health check
+====================================================== */
 app.get("/", (_req, res) => {
   res.send("Backend SofaScore OK");
 });
 
+/* ======================================================
+   🚀 START
+====================================================== */
 app.listen(PORT, () => {
   console.log("Backend running on port", PORT);
 });
